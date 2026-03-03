@@ -6,6 +6,8 @@
 #include <climits>
 #include <cstddef>
 
+#include<iostream>
+
 namespace sjtu
 {
 /**
@@ -16,24 +18,25 @@ template<typename T>
 class vector
 {
 private:
-	static const int initial_size=4;
-	static const int scaleup_rate=2;
-	static T* temp;
+	static const int initial_size;
+	static const int scaleup_rate;
 
 	T* data;
 	int siz,real_siz;
 
 	void scaleUp()
 	{
-		temp=data;
-		data=new T[real_siz*=scaleup_rate]();
-		for(int i=0;i<siz;i++) data[i]=temp[i];
-		delete[] temp;
+		T* temp=data;
+		real_siz*=scaleup_rate;
+		data=static_cast<T*>(::operator new[](real_siz*sizeof(T)));
+		for(int i=0;i<siz;i++) new (data+i) T(temp[i]);
+		for(int i=0;i<siz;i++) temp[i].~T();
+		::operator delete[] (temp);
 	}
 	void expendOne()
 	{
+		if(siz+1>real_siz) scaleUp();
 		siz++;
-		if(siz>real_siz) scaleUp();
 	}
 
 public:
@@ -63,13 +66,15 @@ public:
 		pointer pos;
 
 	public:
+		vector<T>* belong() const {return bel;}
+		pointer position() const {return pos;}
 		iterator(vector<T> *_bel,pointer _pos) noexcept:bel(_bel),pos(_pos){}
 		iterator operator+(const int &n) const {return iterator(bel,pos+n);}
 		iterator operator-(const int &n) const {return iterator(bel,pos-n);}
 		int operator-(const iterator &rhs) const
 		{
-			if(bel!=rhs.bel) throw invalid_iterator();
-			return pos-rhs.pos;
+			if(bel!=rhs.belong()) throw invalid_iterator();
+			return pos-rhs.position();
 		}
 		iterator& operator+=(const int &n){pos+=n;return *this;}
 		iterator& operator-=(const int &n){pos-=n;return *this;}
@@ -79,8 +84,8 @@ public:
 		iterator& operator--()    {pos--;return *this;}
 		T& operator*() const{return *pos;}
 
-		bool operator==(const       iterator &rhs) const {return pos==rhs.pos;}
-		bool operator==(const const_iterator &rhs) const {return pos==rhs.pos;}
+		bool operator==(const       iterator &rhs) const {return pos==rhs.position();}
+		bool operator==(const const_iterator &rhs) const {return pos==rhs.position();}
 		bool operator!=(const       iterator &rhs) const {return !(this->operator==(rhs));}
 		bool operator!=(const const_iterator &rhs) const {return !(this->operator==(rhs));}
 	};
@@ -95,16 +100,18 @@ public:
 		
 	private:
 		const vector<T> *bel;
-		const pointer pos;
+		pointer pos;
 
 	public:
-		const_iterator(vector<T> *_bel,pointer _pos) noexcept:bel(_bel),pos(_pos){}
+		const vector<T>* belong() const {return bel;}
+		pointer position() const {return pos;}
+		const_iterator(const vector<T> *_bel,pointer _pos) noexcept:bel(_bel),pos(_pos){}
 		const_iterator operator+(const int &n) const {return const_iterator(bel,pos+n);}
 		const_iterator operator-(const int &n) const {return const_iterator(bel,pos-n);}
 		int operator-(const const_iterator &rhs) const
 		{
-			if(bel!=rhs.bel) throw invalid_iterator();
-			return pos-rhs.pos;
+			if(bel!=rhs.belong()) throw invalid_iterator();
+			return pos-rhs.position();
 		}
 		const_iterator& operator+=(const int &n){pos+=n;return *this;}
 		const_iterator& operator-=(const int &n){pos-=n;return *this;}
@@ -114,8 +121,8 @@ public:
 		const_iterator& operator--()    {pos--;return *this;}
 		const T& operator*() const{return *pos;}
 
-		bool operator==(const       iterator &rhs) const {return pos==rhs.pos;}
-		bool operator==(const const_iterator &rhs) const {return pos==rhs.pos;}
+		bool operator==(const       iterator &rhs) const {return pos==rhs.position();}
+		bool operator==(const const_iterator &rhs) const {return pos==rhs.position();}
 		bool operator!=(const       iterator &rhs) const {return !(this->operator==(rhs));}
 		bool operator!=(const const_iterator &rhs) const {return !(this->operator==(rhs));}
 
@@ -126,28 +133,36 @@ public:
 	 */
 	vector()
 	{
-		data=new T[real_siz=initial_size]();
+		// std::cout<<"Constructing"<<std::endl;
+		real_siz=initial_size;
+		data=static_cast<T*>(::operator new[](real_siz*sizeof(T)));
 		siz=0;
+		// std::cout<<"Done"<<std::endl;
 	}
 	vector(const vector &other)
 	{
 		siz=other.size();
-		data=new T[real_siz=max(initial_size,siz)]();
-		for(int i=0;i<other.size();i++) data[i]=other[i];
+		real_siz=std::max<int>(initial_size,siz);
+		data=static_cast<T*>(::operator new[](real_siz*sizeof(T)));
+		for(int i=0;i<other.size();i++) new (data+i) T(other[i]);
 	}
-	~vector() {delete[] data;}
+	~vector()
+	{
+		for(int i=0;i<siz;i++) data[i].~T();
+		::operator delete[] (data);
+	}
 	vector &operator=(const vector &other)
 	{
-		if(other.begin()==begin())
-		{
-			siz=other.size(),real_siz=other.real_siz;
-			return;
-		}
+		if(this==&other) return *this;
 
-		delete[] data;
+		for(int i=0;i<siz;i++) data[i].~T();
+		::operator delete[] (data);
+
 		siz=other.size();
-		data=new T[real_siz=max(initial_size,siz)]();
-		for(int i=0;i<other.size();i++) data[i]=other[i];
+		real_siz=std::max<int>(initial_size,siz);
+		data=static_cast<T*>(::operator new[](real_siz*sizeof(T)));
+		for(int i=0;i<other.size();i++) new (data+i) T(other[i]);
+		return *this;
 	}
 	/**
 	 * assigns specified element with bounds checking
@@ -164,8 +179,8 @@ public:
 	      T & operator[](const size_t &pos)       {if(pos<0||pos>=siz) throw index_out_of_bound();return data[pos];}
 	const T & operator[](const size_t &pos) const {if(pos<0||pos>=siz) throw index_out_of_bound();return data[pos];}
 
-	const T & front() const {if(siz==0) throw container_is_empty();return data[0    ]};
-	const T & back () const {if(siz==0) throw container_is_empty();return data[siz-1]};
+	const T & front() const {if(siz==0) throw container_is_empty();return data[0    ];}
+	const T & back () const {if(siz==0) throw container_is_empty();return data[siz-1];}
 	/**
 	 * returns an iterator to the beginning.
 	 */
@@ -189,7 +204,11 @@ public:
 	/**
 	 * clears the contents
 	 */
-	void clear() {siz=0;}
+	void clear()
+	{
+		for(int i=0;i<siz;i++) data[i].~T();
+		siz=0;
+	}
 	/**
 	 * inserts value before pos
 	 * returns an iterator pointing to the inserted value.
@@ -207,11 +226,22 @@ public:
 	 */
 	iterator insert(const size_t &ind, const T &value)
 	{
-		if(ind>siz) throw index_out_of_bound();
+
+		// std::cout<<"Inserting at "<<ind<<std::endl;
+		if((int)ind>siz) throw index_out_of_bound();
 		expendOne();
-		for(iterator i=siz-1;i>=ind;i--) data[i+1]=data[i];
-		data[ind]=value;
-		return iterator(this,ind);
+		// std::cout<<"Expended : siz = "<<siz<<std::endl;
+		for(int i=siz-2;i>=(int)ind;i--)
+		{
+			// std::cout<<i<<" "<<ind<<std::endl;
+			if(i==siz-2) new (data+i+1) T(data[i]);
+			else data[i+1]=data[i];
+		}
+		// std::cout<<"Moved"<<std::endl;
+		if(ind==siz-1) new (data+ind) T(value);
+		else data[ind]=value;
+		// std::cout<<"Done"<<std::endl;
+		return iterator(this,data+ind);
 	}
 	/**
 	 * removes the element at pos.
@@ -230,10 +260,11 @@ public:
 	 */
 	iterator erase(const size_t &ind)
 	{
-		if(ind>=siz) throw index_out_of_bound();
-		for(int i=ind;i<siz;i++) data[i]=data[i+1];
+		if((int)ind>=siz) throw index_out_of_bound();
+		for(int i=ind;i<siz-1;i++) data[i]=data[i+1];
+		data[siz-1].~T();
 		siz--;
-		return iterator(this,ind);
+		return iterator(this,data+ind);
 	}
 	/**
 	 * adds an element to the end.
@@ -253,6 +284,10 @@ public:
 	}
 };
 
+template<typename T>
+const int vector<T>::initial_size=4;
+template<typename T>
+const int vector<T>::scaleup_rate=2;
 
 }
 
