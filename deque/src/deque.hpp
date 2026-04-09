@@ -1,0 +1,428 @@
+#ifndef SJTU_DEQUE_HPP
+#define SJTU_DEQUE_HPP
+
+// #include<iostream>
+#pragma GCC optimize(2)
+#pragma GCC optimize(3)
+#pragma GCC optimize("Ofast")
+
+#include "exceptions.hpp"
+
+#include <cstddef>
+
+namespace sjtu { 
+
+template<class T>
+class deque {
+private:
+	static const int block_size=512;
+	static const int initial_memory_size=4,scaleup_rate=2;
+	struct block;
+	block *memory_start,*memory_end;
+	block *block_l,*block_r;
+
+	class block
+	{
+	public:
+		T* data;
+		T* data_l,*data_r;
+		
+		block(const block &b):data(b.data),data_l(b.data_l),data_r(b.data_r){}		// shallow copy
+		// block(const block &b) // deep copy
+		// {
+		// 	data=static_cast<T*>(::operator new[](block_size*sizeof(T)));
+		// 	data_l=data+(b.data_l-b.data);
+		// 	data_r=data+(b.data_r-b.data);
+		// 	for(T* i=data_l,*j=b.data_l;j!=b.data_r;i++,j++) new(i) T(*j);
+		// }
+		block():data_l(nullptr),data_r(nullptr)
+		{
+			data=static_cast<T*>(::operator new[](block_size*sizeof(T)));
+		}
+		~block()
+		{
+			// for(int i=0;i<block_size;i++) data[i].~T();
+			if(data!=nullptr) ::operator delete[](data);
+		}
+	};
+
+	void scaleUp()
+	{
+		int memory_size=(memory_end-memory_start)*scaleup_rate;
+		int true_size=block_r-block_l;
+		block *new_memory_start=static_cast<block*>(::operator new[](memory_size*sizeof(block)));
+		int start_pos=memory_size/2-true_size/2;
+		for(int i = 0; i<true_size;i++) new (new_memory_start+start_pos+i) block(*(block_l+i));
+		for(int i=0;i<true_size;i++) (block_l+i)->data=nullptr;
+		for(int i=0;i<true_size;i++) (block_l+i)->~block();
+		::operator delete[](memory_start);
+
+		memory_start=new_memory_start;
+		memory_end=memory_start+memory_size;
+		block_l=memory_start+start_pos;
+		block_r=block_l+true_size;
+	}
+
+public:
+	class const_iterator;
+	class iterator {
+		friend class deque;
+	private:
+		const deque *belong_deque;
+		block *belong_block;
+		T *pos;
+
+		explicit iterator(const deque *_belong_deque,int id) noexcept:belong_deque(_belong_deque)
+		{
+			belong_block=belong_deque->block_l+id/block_size;
+			if(belong_deque->block_l==belong_deque->block_r) pos=nullptr;
+			else if(id%block_size==0&&belong_block==belong_deque->block_r) pos=(--belong_block)->data_r;
+			else pos=belong_block->data+id%block_size;
+		}
+		inline int getId() const
+		{
+			if(pos==nullptr) return (belong_block-belong_deque->block_l)*block_size;
+			return (belong_block-belong_deque->block_l)*block_size+pos-belong_block->data;
+		}
+	public:
+		explicit iterator(const deque *_belong_deque,block *_belong_block,T *_pos) noexcept:belong_deque(_belong_deque)
+		{
+			belong_block=_belong_block;
+			pos=_pos;
+		}
+		iterator():belong_deque(nullptr),belong_block(nullptr),pos(nullptr){}
+		iterator(const iterator &it):belong_deque(it.belong_deque),belong_block(it.belong_block),pos(it.pos){}
+		iterator operator=(const iterator &it){belong_deque=it.belong_deque,belong_block=it.belong_block,pos=it.pos;return *this;}
+		iterator operator+(const int &n) const {return iterator(belong_deque,getId()+n);}
+		iterator operator-(const int &n) const {return iterator(belong_deque,getId()-n);}
+		int operator-(const iterator &rhs) const {
+			if(belong_deque!=rhs.belong_deque) throw invalid_iterator();
+			return getId()-rhs.getId();
+		}
+		iterator operator+=(const int &n) {return *this=iterator(belong_deque,getId()+n);}
+		iterator operator-=(const int &n) {return *this=iterator(belong_deque,getId()-n);}
+		iterator operator++(int) {iterator tmp=*this;++(*this);return tmp;}
+		iterator operator--(int) {iterator tmp=*this;--(*this);return tmp;}
+		iterator& operator++()
+		{
+			++pos;
+			if(pos==belong_block->data_r&&belong_block+1!=belong_deque->block_r)
+			{
+				++belong_block;
+				pos = belong_block->data_l;
+			}
+			return *this;
+		}
+		iterator& operator--()
+		{
+			if(pos==belong_block->data_l&&belong_block!=belong_deque->block_l)
+			{
+				--belong_block;
+				pos=belong_block->data_r-1;
+			}
+			else --pos;
+			return *this;
+		}
+		T& operator*() const
+		{
+			if(belong_deque==nullptr) throw invalid_iterator();
+			if(belong_deque->block_l==nullptr||belong_block<belong_deque->block_l||belong_block>=belong_deque->block_r) throw invalid_iterator();
+			if(pos==nullptr||pos<belong_block->data_l||pos>=belong_block->data_r) throw invalid_iterator();
+			return *pos;
+		}
+		T* operator->() const noexcept {return pos;}
+		bool operator==(const iterator &rhs) const
+		{
+			if(belong_deque!=rhs.belong_deque) return 0;
+			if(belong_block!=rhs.belong_block) return 0;
+			return pos==rhs.pos;
+		}
+		bool operator==(const const_iterator &rhs) const {if(belong_deque!=rhs.belong_deque) return 0;return ((*this)-rhs)==0;}
+		bool operator!=(const       iterator &rhs) const {return !((*this)==rhs);}
+		bool operator!=(const const_iterator &rhs) const {return !((*this)==rhs);}
+	};
+	class const_iterator {
+		friend class deque;
+		// it should has similar member method as iterator.
+		//  and it should be able to construct from an iterator.
+	private:
+		const deque *belong_deque;
+		const block *belong_block;
+		const T *pos;
+
+		inline explicit const_iterator(const deque *_belong_deque,int id) noexcept:belong_deque(_belong_deque)
+		{
+			belong_block=belong_deque->block_l+id/block_size;
+			if(belong_deque->block_l==belong_deque->block_r) pos=nullptr;
+			else if(id%block_size==0&&belong_block==belong_deque->block_r) pos=(--belong_block)->data_r;
+			else pos=belong_block->data+id%block_size;
+		}
+		inline int getId() const
+		{
+			if(pos==nullptr) return (belong_block-belong_deque->block_l)*block_size;
+			return (belong_block-belong_deque->block_l)*block_size+pos-belong_block->data;
+		}
+	public:
+		explicit const_iterator(const deque *_belong_deque,block *_belong_block,T *_pos) noexcept:belong_deque(_belong_deque)
+		{
+			belong_block=_belong_block;
+			pos=_pos;
+		}
+		const_iterator():belong_deque(nullptr),belong_block(nullptr),pos(nullptr){}
+		const_iterator(const iterator &it):belong_deque(it.belong_deque),belong_block(it.belong_block),pos(it.pos){}
+		const_iterator(const const_iterator &it):belong_deque(it.belong_deque),belong_block(it.belong_block),pos(it.pos){}
+		const_iterator operator=(const const_iterator &it){belong_deque=it.belong_deque,belong_block=it.belong_block,pos=it.pos;return *this;}
+		const_iterator operator+(const int &n) const {return const_iterator(belong_deque,getId()+n);}
+		const_iterator operator-(const int &n) const {return const_iterator(belong_deque,getId()-n);}
+		int operator-(const const_iterator &rhs) const {
+			if(belong_deque!=rhs.belong_deque) throw invalid_iterator();
+			return getId()-rhs.getId();
+		}
+		const_iterator operator+=(const int &n) {return *this=const_iterator(belong_deque,getId()+n);}
+		const_iterator operator-=(const int &n) {return *this=const_iterator(belong_deque,getId()-n);}
+		const_iterator operator++(int) {const_iterator tmp=*this;(*this)+=1;return tmp;}
+		const_iterator operator--(int) {const_iterator tmp=*this;(*this)-=1;return tmp;}
+		const_iterator& operator++() {(*this)+=1;return *this;}
+		const_iterator& operator--() {(*this)-=1;return *this;}
+		const T& operator*() const
+		{
+			if(belong_deque==nullptr) throw invalid_iterator();
+			if(belong_deque->block_l==nullptr||belong_block<belong_deque->block_l||belong_block>=belong_deque->block_r) throw invalid_iterator();
+			if(pos==nullptr||pos<belong_block->data_l||pos>=belong_block->data_r) throw invalid_iterator();
+			return *pos;
+		}
+		const T* operator->() const noexcept {return pos;}
+		bool operator==(const       iterator &rhs) const {if(belong_deque!=rhs.belong_deque) return 0;return ((*this)-rhs)==0;}
+		bool operator==(const const_iterator &rhs) const {if(belong_deque!=rhs.belong_deque) return 0;return ((*this)-rhs)==0;}
+		bool operator!=(const       iterator &rhs) const {return !((*this)==rhs);}
+		bool operator!=(const const_iterator &rhs) const {return !((*this)==rhs);}
+	};
+	deque()
+	{
+		// std::cout<<"Constructing deque"<<std::endl;
+		memory_start=static_cast<block*>(::operator new[](initial_memory_size*sizeof(block)));
+		memory_end=memory_start+initial_memory_size;
+		block_l=memory_start+2,block_r=memory_start+2;
+		// std::cout<<"Done"<<std::endl;
+	}
+	deque(const deque &other)
+	{
+		memory_start=nullptr;
+		*this=other;
+	}
+	~deque()
+	{
+		// std::cout<<"Distructing deque"<<std::endl;
+		for(iterator it=begin();it!=end();it++) (*it).~T();
+		for(block *i=block_l;i!=block_r;i++) i->~block();
+		::operator delete[](memory_start);
+		// std::cout<<"Done"<<std::endl;
+	}
+	deque &operator=(const deque &other)
+	{
+		if(this==&other) return *this;
+		
+		if(memory_start!=nullptr)
+		{
+			for(iterator it=begin();it!=end();it++) (*it).~T();
+			for(block *i=block_l;i!=block_r;i++) i->~block();
+			::operator delete[](memory_start);
+		}
+
+		memory_start=static_cast<block*>(::operator new[]((other.memory_end-other.memory_start)*sizeof(block)));
+		memory_end=memory_start+(other.memory_end-other.memory_start);
+		block_l   =memory_start+(other.block_l   -other.memory_start);
+		block_r   =memory_start+(other.block_r   -other.memory_start);
+
+		for(block *u=block_l,*v=other.block_l;v!=other.block_r;u++,v++)
+		{
+			new (u) block();
+			u->data_l=u->data+(v->data_l-v->data);
+			u->data_r=u->data+(v->data_r-v->data);
+			for(T *i=u->data_l,*j=v->data_l;j!=v->data_r;i++,j++) new(i) T(*j);
+		}
+		return *this;
+	}
+	T & at(const size_t &pos)
+	{
+		if(pos<0||pos>=size()) throw index_out_of_bound();
+		int k=pos;
+		for(block *i=block_l;i!=block_r;i++)
+		{
+			if(k<i->data_r-i->data_l) return i->data_l[k];
+			else k-=i->data_r-i->data_l;
+		}
+		throw index_out_of_bound();
+	}
+	T & at(const size_t &pos) const
+	{
+		if(pos<0||pos>=size()) throw index_out_of_bound();
+		int k=pos;
+		for(block *i=block_l;i!=block_r;i++)
+		{
+			if(k<i->data_r-i->data_l) return i->data_l[k];
+			else k-=i->data_r-i->data_l;
+		}
+		throw index_out_of_bound();
+	}
+	T & operator[](const size_t &pos) {return at(pos);}
+	const T & operator[](const size_t &pos) const {return at(pos);}
+	T & front() const
+	{
+		if(size()==0) throw container_is_empty();
+		return *(block_l->data_l);
+	}
+	T & back() const
+	{
+		if(size()==0) throw container_is_empty();
+		return *((block_r-1)->data_r-1);
+	}
+
+	iterator begin() const
+	{
+		if(block_l==block_r) return iterator(this,block_l,nullptr);
+		return iterator(this,block_l,block_l->data_l);
+	}
+	const_iterator cbegin() const {return begin();}
+	iterator end() const
+	{
+		if(block_l==block_r) return iterator(this,block_r,nullptr);
+		return iterator(this,block_r-1,(block_r-1)->data_r);
+	}
+	const_iterator cend() const {return end();}
+
+	bool empty() const {return block_l==block_r;}
+	size_t size() const {return end()-begin();}
+	void clear() 
+	{
+		*this=deque();
+	}
+	/**
+	 * inserts elements at the specified locat on in the container.
+	 * inserts value before pos
+	 * returns an iterator pointing to the inserted value
+	 *     throw if the iterator is invalid or it point to a wrong place.
+	 */
+	iterator insert(iterator pos, const T &value)
+	{
+		int p=pos-begin();
+		if(pos.belong_deque!=this||p<0||p>size()) throw invalid_iterator();
+
+		if(size()!=0&&p<size()/2)
+		{
+			push_front(value);
+			pos=begin()+p;
+			for(iterator it=begin();it!=pos;++it) *it=*(it+1);
+			*pos=value;
+			return pos;
+		}
+		else
+		{
+			push_back(value);
+			pos=begin()+p;
+			for(iterator it=end()-1;it!=pos;--it) *it=*(it-1);
+			*pos=value;
+			return pos;
+		}
+	}
+	/**
+	 * removes specified element at pos.
+	 * removes the element at pos.
+	 * returns an iterator pointing to the following element, if pos pointing to the last element, end() will be returned.
+	 * throw if the container is empty, the iterator is invalid or it points to a wrong place.
+	 */
+	// iterator erase(iterator pos)
+	// {
+	// 	if(size()==0) throw container_is_empty();
+	// 	if(pos.belong_deque!=this||pos-begin()<0||pos-begin()>=size()) throw invalid_iterator();
+
+	// 	for(iterator it=pos;it+1!=end();it++) *it=*(it+1);
+	// 	pop_back();
+	// 	return pos;
+	//  }
+	iterator erase(iterator pos)
+	{
+		if(size()==0) throw container_is_empty();
+
+		int p=pos-begin();
+		if(pos.belong_deque!=this||p<0||p>=size()) throw invalid_iterator();
+
+		if(p<size()/2)
+		{
+			iterator b=begin();
+			for(iterator it=pos;it!=b;--it) *it=*(it-1);
+			pop_front();
+		}
+		else
+		{
+			iterator e=end();
+			for(iterator it=pos;it+1!=e;++it) *it=*(it+1);
+			pop_back();
+		}
+		return begin()+p;
+	}
+	/**
+	 * adds an element to the end
+	 */
+	void push_back(const T &value)
+	{
+		// std::cout<<"PBing"<<std::endl;
+		if(empty()||(block_r-1)->data_r==(block_r-1)->data+block_size)
+		{
+			// std::cout<<"Last block is full"<<std::endl;
+			if(memory_end==block_r) scaleUp();
+			new(block_r++) block();
+			(block_r-1)->data_l=(block_r-1)->data_r=(block_r-1)->data;
+		}
+		new(((block_r-1)->data_r)++) T(value);
+	}
+	/**
+	 * removes the last element
+	 *     throw when the container is empty.
+	 */
+	void pop_back() 
+	{
+		if(empty()) throw container_is_empty(); 
+
+		((block_r-1)->data_r-1)->~T();
+		(block_r-1)->data_r--;
+		if((block_r-1)->data_r==(block_r-1)->data_l)
+		{
+			(block_r-1)->~block();
+			block_r--;
+		}
+	}
+	/**
+	 * inserts an element to the beginning.
+	 */
+	void push_front(const T &value)
+	{
+		if(empty()||block_l->data_l==block_l->data)
+		{
+			if(memory_start==block_l) scaleUp();
+			new(--block_l) block();
+			block_l->data_l=block_l->data_r=block_l->data+block_size;
+		}
+		new(--block_l->data_l) T(value);
+	}
+	/**
+	 * removes the first element.
+	 *     throw when the container is empty.
+	 */
+	void pop_front()
+	{
+		if(empty()) throw container_is_empty(); 
+
+		block_l->data_l->~T();
+		block_l->data_l++;
+		if(block_l->data_l==block_l->data_r)
+		{
+			block_l->~block();
+			block_l++;
+		}
+	}
+};
+
+}
+
+#endif

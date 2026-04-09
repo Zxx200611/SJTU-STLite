@@ -1,3 +1,11 @@
+.vscode
 vector/data
 vector/CMakeLists.txt
 vector/cmake-build
+deque/build
+deque/data
+deque/CMakeLists.txt
+priority_queue.bak
+priority_queue/build
+priority_queue/test
+priority_queue/CMakeLists.txt
