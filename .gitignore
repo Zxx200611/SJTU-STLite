@@ -9,3 +9,7 @@ priority_queue.bak
 priority_queue/build
 priority_queue/test
 priority_queue/CMakeLists.txt
+map/build
+map/corner_data
+map/data
+map/CMakeLists.txt
